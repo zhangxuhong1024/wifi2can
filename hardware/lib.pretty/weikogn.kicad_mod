@@ -1,0 +1,12 @@
+(module Connectors:1pin (layer F.Cu) (tedit 5B5608AC)
+  (descr "module 1 pin (ou trou mecanique de percage)")
+  (tags DEV)
+  (fp_text reference "" (at 0 0.127) (layer Dwgs.User) hide
+    (effects (font (size 0.127 0.127) (thickness 0.03175)))
+  )
+  (fp_text value "" (at 0 0) (layer F.Fab) hide
+    (effects (font (size 0.127 0.127) (thickness 0.03175)))
+  )
+  (pad "" thru_hole circle (at 0 0) (size 0.3 0.3) (drill 0.1) (layers *.Cu)
+    (zone_connect 2))
+)
