@@ -35,7 +35,7 @@ class CAN (object):
             raise OSError("MCP2515 init fail .")
 
     def SetINT(self, INT):
-        pass #待补充。期待心情非常美好的那一天！
+        pass #高兴时再弄。期待心情非常美好的那一天！
 
     def Stop(self):
         # 功能：停止MCP2515
@@ -93,7 +93,7 @@ class CAN (object):
         mode = b'\x00' if (ListenOnly==False) else b'\x60'
         self._spi_WriteBit(b'\x0f',b'\xe0', mode)
 
-    def Send_msg(self, msg, sendchangel=None):
+    def Send_msg(self, msg, sendforce=False):
         # 功能：发送报文。
         # msg：
         #   msg['id']   :待发送报文的ID
@@ -101,20 +101,26 @@ class CAN (object):
         #   msg['data'] :待发送报文的数据
         #   msg['dlc']  :待发送报文的长度
         #   msg['rtr']  :待发送报文是否是远程帧
-        # sendchangel：
-        #   指定发送报文的通道。有效值如下：
-        #       0 :  通道0
-        #       1 :  通道1
-        #       2 :  通道2
-        #   MCP2515提供三个发送通道，默认使用通道0。后续再实现自动寻找空闲通道，敬请期待。
-        # 注意：若通道中存在待发送报文，则会停止此前的报文发送。
-        #       然后用新报文替换，并再次进入待发送状态。
-        if sendchangel==None:
-            sendchangel = 0
+        # sendforce：
+        #   False:不强制发送。将自动寻找空闲的发送通道进行发送，若无空闲通道，则抛出异常。（默认）
+        #   True: 强制发送。将会强行停止此前的发送通道0的报文发送，以当前报文替代发送。
+        #         也就是说，原通道0中待发送的报文，将会丢失。
         self._MsgVerificationCheck(msg) # msg check.
-        # 停止此前寄存器里的报文发送
-        ctl = (((sendchangel%3)+3)<<4).to_bytes(1,'big')
-        self._spi_WriteBit(ctl,b'\x08',b'\x00')
+        rx_flag = self._spi_ReadStatus()
+        if not (rx_flag&0b00000100):
+            sendchangel = 0
+        elif not (rx_flag&0b00010000):
+            sendchangel = 1
+        elif not (rx_flag&0b01000000):
+            sendchangel = 2
+        elif sendforce==True:
+            # 强制指定使用0通道报文发送。
+            sendchangel = 0
+            # 停止此前寄存器里的报文发送
+            # 注意：此举会导致原报文发送被终止。
+            self._spi_WriteBit(b'\x30',b'\x08',b'\x00')
+        else
+            raise Exception('Tx Buffer is fulled !')
         # 数据规整
         self.TxBuf = bytearray(13)
         if msg.get('ext'):
@@ -136,14 +142,12 @@ class CAN (object):
             self.TxBuf[4] |= msg.get('dlc') & 0x0F
             self.TxBuf[5:13] = msg.get('data')[:msg.get('dlc')]
         # 数据装载
-        dat = ((((sendchangel%3)+3)<<4)+1).to_bytes(1,'big')
-        self._spi_WriteReg(dat,self.TxBuf)
+        self._spi_LoadTxBuf(self.TxBuf, sendchangel)
         # 发送
-        self._spi_SendMsg(1<<sendchangel) # self._spi_WriteBit(ctl,b'\x08',b'\x08')
+        self._spi_RequestToSend(sendchangel)
 
     def Recv_msg(self):
-        # 功能：查询MCP2515是否有收到报文。若有则存入Buf。即调用了CheckRx。
-        #       查询Buf是否有报文。若有，返回最早接收的一帧报文，否则返回None。
+        # 功能：查询Buf是否有报文。若有，返回最早接收的一帧报文，否则返回None。
         # 返回Msg说明：
         #       msg['tm']    :接收报文的时间。Timer started at power on. unit=1ms。
         #       msg['id']    :接收的报文ID
@@ -152,25 +156,24 @@ class CAN (object):
         #       msg['dlc']   :接收的报文长度
         #       msg['rtr']   :接收的报文是否是远程帧
         # 注意：每次仅仅返回一帧报文，一帧！
-        self.CheckRx()
         if len(self._RxBuf) == 0: 
             return None
         dat = self._RxBuf.pop(0)
         msg = {}
         msg['tm'] = int.from_bytes(dat[-8:],'big')
-        msg['dlc'] = int.from_bytes(dat[4:5],'big') & 0x0F
+        msg['dlc'] = dat[4] & 0x0F
         msg['data'] = dat[5:13]
-        ide = (int.from_bytes(dat[1:2],'big')>>3) & 0x01 # 0:标准帧  1:扩展帧
+        ide = (dat[1]>>3) & 0x01 # 0:标准帧  1:扩展帧
         msg['ext'] = True if ide==1 else False
         id_s0_s10 = int.from_bytes(dat[:2],'big') >> 5
         id_e16_e17 = int.from_bytes(dat[:2],'big') & 0x03
         id_e0_e15 = int.from_bytes(dat[2:4],'big')
         if msg['ext']:
             msg['id'] = (id_s0_s10<<18) + (id_e16_e17<<16) + id_e0_e15
-            msg['rtr'] = True if (int.from_bytes(dat[4:5],'big') & 0x40)  else False
+            msg['rtr'] = True if (dat[4] & 0x40)  else False
         else:
             msg['id'] = id_s0_s10
-            msg['rtr'] = True if (int.from_bytes(dat[1:2],'big') & 0x10) else False
+            msg['rtr'] = True if (dat[1] & 0x10) else False
         return msg
 
     def CheckRx(self):
@@ -178,13 +181,13 @@ class CAN (object):
         # 注意：若不能及时将MCP内的报文存入Buf，可能会导致MCP无法接收新的报文。
         #       也就是说，可能会报文丢失。
         #       所以，尽量多调用此函数咯~~
-        rx_flag = int.from_bytes(self._spi_ReadStatus(),'big')
+        rx_flag = self._spi_ReadStatus()
         if (rx_flag&0x01):
-            dat = self._spi_RecvMsg(0)
+            dat = self._spi_ReadRxBuf(0)
             tm = (time.ticks_ms()).to_bytes(8,'big')
             self._RxBuf.append(dat+tm)
         if (rx_flag&0x02):
-            dat = self._spi_RecvMsg(1)
+            dat = self._spi_ReadRxBuf(1)
             tm = (time.ticks_ms()).to_bytes(8,'big')
             self._RxBuf.append(dat+tm)
         return True if (rx_flag&0b11000000) else False
@@ -201,7 +204,7 @@ class CAN (object):
         self._spi_WriteBit(b'\x0c',b'\x0F',b'\x0C')
         if value==None:
             reg = self._spi_ReadReg(b'\x0c')
-            v = int.from_bytes(reg,'big') & {0:0x10,1:0x20}.get(pin,0x00)
+            v = reg & {0:0x10,1:0x20}.get(pin,0x00)
             return 1 if (v!=0) else 0
         p = {0:b'\x10', 1:b'\x20'}.get(pin,b'\x00')
         v = {'H':b'\x30', 'L':b'\x00'}.get(value,b'\x00')
@@ -216,7 +219,7 @@ class CAN (object):
         # 注意：调用此方法后，即使原先此端口是否为发送报文中断模式，都会把端口设置为输入。
         p = {2:0x20, 1:0x10, 0:0x08}.get(pin) #端口无效咧？ 不管不顾咯！
         rst = self._spi_ReadReg(b'\x0d')
-        return 1 if ((rst[0]&p) != 0) else 0
+        return 1 if ((rst & p) != 0) else 0
 
     def _MsgVerificationCheck(self, msg):
         # 功能：检查msg内容，是否为符合发送要求的CAN数据格式。
@@ -255,14 +258,14 @@ class CAN (object):
         self.spi.write(value)
         self.cs.on()
 
-    def _spi_ReadReg(self, addr, num=1):
+    def _spi_ReadReg(self, addr):
         # 功能：MCP2515_SPI指令 - 读寄存器
         self.cs.off()
         self.spi.write(b'\x03')
         self.spi.write(addr)
-        buf = self.spi.read(num)
+        buf = self.spi.read(1)
         self.cs.on()
-        return buf
+        return buf[0]
 
     def _spi_WriteBit(self,addr, mask, value):
         # 功能：MCP2515_SPI指令 - 位修改
@@ -279,22 +282,28 @@ class CAN (object):
         self.spi.write(b'\xa0')
         buf = self.spi.read(1)
         self.cs.on()
-        return buf
+        return buf[0]
 
-    def _spi_RecvMsg(self, select):
-        # 功能：MCP2515_SPI指令 - 读Rx缓冲区
+    def _spi_ReadRxBuf(self, select):
+        # 功能：MCP2515_SPI指令 - 读取Rx缓冲区
         self.cs.off()
         if select==0:
             self.spi.write(b'\x90')
-            buf = self.spi.read(13)
         if select==1:
             self.spi.write(b'\x94')
-            buf = self.spi.read(13)
+        buf = self.spi.read(13)
         self.cs.on()
         return buf
 
-    def _spi_SendMsg(self, select):
+    def _spi_LoadTxBuf(self, TxBuf, sendchangel):
+        # 功能：MCP2515_SPI指令 - 装载Tx缓冲区
+        self.cs.off()
+        self.spi.write((0x40+((sendchangel<<1)&0x07)).to_bytes(1,'big'))
+        self.spi.write(TxBuf)
+        self.cs.on()
+
+    def _spi_RequestToSend(self, sendchangel):
         # 功能：MCP2515_SPI指令 - 请求发送报文
         self.cs.off()
-        self.spi.write((0x80+(select&0x07)).to_bytes(1,'big'))
+        self.spi.write((0x80+((1<<sendchangel)&0x07)).to_bytes(1,'big'))
         self.cs.on()

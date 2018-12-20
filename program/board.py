@@ -80,6 +80,7 @@ def led_dat(status=None):
 #         status=0：LED灭
 #         status=1：LED亮
 # '''
+    global can
     if can==None: 
         raise Exception('Please call init() before use this funtion.') 
     if status==None: 
@@ -92,11 +93,45 @@ def led_err(status=None):
 #         status=0：LED灭
 #         status=1：LED亮
 # '''
+    global can
     if can==None: 
         raise Exception('Please call init() before use this funtion.') 
     if status==None: 
         return can.Pin_RXxBF_as_Output(1)
     can.Pin_RXxBF_as_Output(1, {1:'H',0:'L'}.get(status,'L'))
 
+def wifi(en=None,essid=None,password=None):
+#''' 
+#         en=None : 返回AP状态
+#         en=True : 设置AP为启用状态
+#         en=False: 设置AP为关闭状态态
+#         essid    : AP配置，热点名称：
+#         password : AP配置，热点密码：
+# '''
+    import network
+    ap = network.WLAN(network.AP_IF)
+    if en==None and essid==None and password==None:
+        if not ap.active():
+            return None
+        else:
+            return ap.ifconfig()
+    if en==True:
+        ap.active(True)
+    elif en==False:
+        ap.active(False)
+    if not essid==None:
+        if not ap.active():
+            raise Exception('Please active the AP first.')
+        ap.config(essid=essid)
+    if not password==None:
+        if not ap.active():
+            raise Exception('Please active the AP first.')
+        ap.config(password=password)
+    
 
-
+def web(en=None):
+    import web
+    if en==True:
+        web.Start()
+    elif en==False:
+        web.Stop()

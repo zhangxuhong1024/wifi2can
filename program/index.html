@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en-us">
+<head>
+<meta charset="UTF-8">
+<meta name="renderer" content="webkit">
+<meta http-equiv="Content-Type" content="multipart/form-data; charset=utf-8" />
+<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+<title>Web Control</title>
+<style type="text/css" id="style">
+    .b{
+        width: 50px;
+        height: 25px;
+    }
+</style>
+</head>
+
+<body>
+    <h1>Web Control</h1>
+    <div>
+        CP (%) :
+        <input class="b" id="cpval" type="text" value=123 maxlength=3 >
+        <input class="b" id="cpset" type="button" >
+    </div>
+    <div>
+        Realy :
+        <input class="b" id="relayClone" type="button" >
+        <input class="b" id="relayOpen"  type="button" >
+    </div>
+    <div>
+        Ai (v) :
+        <input class="b" id="aival" type="text" disabled=ture value="0xff" >
+    </div>
+</body>
+
+
+<script>
+function transfer(msg) 
+{
+    var xhr = new XMLHttpRequest();
+    xhr.onreadystatechange = () => 
+    {
+        if (xhr.readyState == 4) 
+        {
+            if ((xhr.status >= 200 && xhr.status < 300) || xhr.status == 304) 
+            {
+                // update all value.
+                var st = xhr.statusText
+                cpval.value = st.match(/CP.*CP/)[0].slice(2,-2)
+                aival.value = st.match(/AI.*AI/)[0].slice(2,-2)
+            }
+        }
+    }
+    xhr.open('GET', msg, true);
+    xhr.send()
+}
+
+var cpval      = document.getElementById('cpval')
+var cpset      = document.getElementById('cpset')
+var relayClone = document.getElementById('relayClone')
+var relayOpen  = document.getElementById('relayOpen')
+var aival      = document.getElementById('aival')
+
+cpset.onclick = function(event) 
+{
+    transfer('WebCtrl_SET_CP_' + cpval.value)
+}
+relayOpen.onclick = function(event) 
+{
+    transfer('WebCtrl_SET_RELAY_OPEN')
+}
+relayClone.onclick = function(event) 
+{
+    transfer('WebCtrl_SET_RELAY_CLOSE')
+}
+
+function reflesh ()
+{
+    transfer('WebCtrl_REFLESH')
+}
+
+setInterval(reflesh,2000);
+
+</script>
+
+</html>

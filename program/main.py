@@ -1,4 +1,7 @@
+import board
+
 board.cp(20)
+board.led_sys(1)
 
 def test():
     import time
@@ -11,7 +14,14 @@ def test():
         'rtr':False}
     while(True):
         board.can.Send_msg(msg)
-        board.led_sys(1)
+        board.led_dat(1)
+        board.led_err(0)
         time.sleep(0.1)
-        board.led_sys(0)
+        board.led_dat(0)
+        board.led_err(1)
         time.sleep(0.9)
+
+#while (True):
+#    if board.ai()>1.5:
+#        test()
+
